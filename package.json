@@ -3,6 +3,7 @@
     "amazon-mws": "^0.0.15",
     "dotenv": "^5.0.1",
     "fs": "^0.0.1-security",
+    "moment": "^2.22.0",
     "xml2js": "^0.4.19"
   }
 }
