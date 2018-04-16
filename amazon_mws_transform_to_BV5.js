@@ -122,7 +122,7 @@ const buildXML = (orders) => {
               },
               UnitOfMeasure: null,
               ManufacturerPartID: null,
-              ManufacturerName
+              ManufacturerName: null
             }
           }
         }
@@ -144,8 +144,6 @@ const init = () => fetchOrders().then((ordersData) => {
       if (orders.length === _orders.length) { buildXML(orders) }
   })).catch((e) => logResponse(e))
 }).catch((e) => logResponse(e))
-
-buildXML()
 
 // TODO: Error handling
 // TODO: Throttling
