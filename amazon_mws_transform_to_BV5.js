@@ -14,7 +14,7 @@ const amazonMws = require('amazon-mws')(MWS_ACCESS_KEY_ID, MWS_SECRET_KEY)
 const moment = require('moment')
 const builder = require('xmlbuilder');
 
-// Logic
+// Business Logic
 const fetchOrders = (createdAfter, createdBefore) => {
   return new Promise((resolve, reject) => {
     amazonMws.orders.search({
@@ -25,25 +25,52 @@ const fetchOrders = (createdAfter, createdBefore) => {
         'CreatedAfter': createdAfter,
         'CreatedBefore': createdBefore
     }, (error, response) => {
-      if (error) { reject(error); }
+      if (error) {
+        console.log('error:', error)
+        return reject(error)
+      }
 
-      console.log('response', response);
+      return resolve(response.Orders.Order)
     })
   })
-
 }
 
 const fetchOrderItems = (orders) => {
-  amazonMws.orders.search({
-      'Version': '2013-09-01',
-      'Action': 'ListOrderItems',
-      'SellerId': MWS_SELLER_ID,
-      'MarketplaceId.Id.1': MWS_MARKETPLACE_ID,
-      'AmazonOrderId': orderId
+  return new Promise((resolve, reject) => {
+    const orderWithItems = []
+    
+    // Make sure orders is an array
+    if (!util.isArray(orders)) {
+      orders = [orders]
+    }
+
+    orders.forEach((order, index) => amazonMws.orders.search({
+        'Version': '2013-09-01',
+        'Action': 'ListOrderItems',
+        'SellerId': MWS_SELLER_ID,
+        'MarketplaceId.Id.1': MWS_MARKETPLACE_ID,
+        'AmazonOrderId': order.AmazonOrderId
+      }, (error, response) => {
+        if (error) {
+          console.log('error:', error)
+          return reject(error)
+        }
+        
+        // Make sure OrderItems is an array (Amazon capitalizes properties, stay consistent)
+        const OrderItems = util.isArray(response.OrderItems.OrderItem) ? response.OrderItems.OrderItem : [response.OrderItems.OrderItem]
+        orderWithItems.push({...order, OrderItems})
+        
+        if (orders.length === orderWithItems.length) {
+          console.log(util.inspect(orderWithItems, false, null))
+          return resolve(orderWithItems)
+        }
+      })
+    )
   })
 }
 
-const buildXML = (orders) => {
+const buildXMLFiles = (order, orderItems) => {
+  
   const template = {
     cXML: {
       '@xmllang': 'en_US',
@@ -144,21 +171,12 @@ const init = () => {
   return fetchOrders(yesterday, today)
     .then(fetchOrderItems)
     .then(buildXMLFiles)
-    .then(compressFiles)
-    .then(saveToDirectory)
-    .then(emailToRecipient)
+    // .then(compressFiles)
+    // .then(saveToDirectory)
+    // .then(emailToRecipient)
 }
 
-// (ordersData) => {
-  //   const _orders = ordersData.Orders.Order
-  //   let orders = [] // Amazon doesn't give us detailed order info, so we must make individual requests for each order
-  //
-  //   _orders.forEach((order) => fetchOrderItems(order.AmazonOrderId).then((orderData) => {
-  //       orders.push(orderData)
-  //       // Once all orders have been recieved, go ahead and create XML
-  //       if (orders.length === _orders.length) { buildXML(orders) }
-  //   })).catch((e) => logResponse(e))
-  // }
+init()
 
 // TODO: Error handling
 // TODO: Throttling
