@@ -8,11 +8,9 @@ const MWS_SELLER_ID = process.env.MWS_SELLER_ID
 const MWS_MARKETPLACE_ID = process.env.MWS_MARKETPLACE_ID
 
 // Packages
-const fs = require('fs');
-const util = require('util')
-const amazonMws = require('amazon-mws')(MWS_ACCESS_KEY_ID, MWS_SECRET_KEY)
-const moment = require('moment')
-const builder = require('xmlbuilder');
+const fs = require('fs')
+const xml2js = require('xml2js')
+const parser = xml2js.Parser({explicitArray: false})
 
 // Logic
 const today = moment().subtract(25, 'day').seconds(0).milliseconds(0).toISOString()
