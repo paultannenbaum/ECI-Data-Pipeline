@@ -3,6 +3,7 @@
     "amazon-mws": "^0.0.15",
     "dotenv": "^5.0.1",
     "fs": "^0.0.1-security",
+    "mkdirp": "^0.5.1",
     "moment": "^2.22.0",
     "xmlbuilder": "^9.0.7"
   }
