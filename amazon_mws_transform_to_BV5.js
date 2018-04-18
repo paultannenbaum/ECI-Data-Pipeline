@@ -21,7 +21,6 @@ const zipper = require('zip-local');
 // Business Logic
 const fetchOrders = (createdAfter, createdBefore) => {
   return new Promise((resolve, reject) => {
-    
     amazonMws.orders.search({
         'Version': '2013-09-01',
         'Action': 'ListOrders',
@@ -34,19 +33,17 @@ const fetchOrders = (createdAfter, createdBefore) => {
         console.log('error:', error)
         return reject(error)
       }
-      
+
       // TODO: Handle zero orders
       if (isEmpty(response.Orders.Order)) {
         console.log('no orders')
       }
-      
+
       // Make sure orders is an array
-      const orders = util.isArray(response.Orders.Order) 
-        ? response.Orders.Order 
+      const orders = util.isArray(response.Orders.Order)
+        ? response.Orders.Order
         : [response.Orders.Order]
-        
-      console.log('TOTAL ORDERS:', orders.length)  
-      
+
       return resolve(orders)
     })
   })
@@ -55,7 +52,7 @@ const fetchOrders = (createdAfter, createdBefore) => {
 const fetchOrderItems = (orders) => {
   return new Promise((resolve, reject) => {
     const orderWithItems = []
-    
+
     orders.forEach((order) => {
       return amazonMws.orders.search({
           'Version': '2013-09-01',
@@ -68,13 +65,13 @@ const fetchOrderItems = (orders) => {
             console.log('error:', error)
             return reject(error)
           }
-          
+
           // Make sure OrderItems is an array (Amazon capitalizes properties, stay consistent)
-          const OrderItems = util.isArray(response.OrderItems.OrderItem) 
-            ? response.OrderItems.OrderItem 
+          const OrderItems = util.isArray(response.OrderItems.OrderItem)
+            ? response.OrderItems.OrderItem
             : [response.OrderItems.OrderItem]
           orderWithItems.push({...order, OrderItems})
-          
+
           if (orders.length === orderWithItems.length) {
             return resolve(orderWithItems)
           }
@@ -84,16 +81,24 @@ const fetchOrderItems = (orders) => {
 }
 
 const buildXMLFiles = (orders) => {
+  console.log('***************************************************************************')
+  console.log('Orders Total:', orders.length)
+  console.log('***************************************************************************')
+
   return new Promise((resolve, reject) => {
     try {
       const baseDirectoryPath = './files'
       const archiveDirectoryPath = `${baseDirectoryPath}/${moment().format('MM_DD_YY')}`
       let generatedFiles = 0
-      
+
       mkdirp(archiveDirectoryPath, (e) => {
         if (e) { throw(e) }
-        
+
         orders.forEach(order => {
+          console.log('***************************************************************************')
+          console.log('Order:', util.inspect(order, false, null))
+          console.log('***************************************************************************')
+
           const fileName = order.AmazonOrderId
           const filePath = `${archiveDirectoryPath}/${order.AmazonOrderId}.xml`
           const encoding = 'utf-8'
@@ -113,7 +118,7 @@ const buildXMLFiles = (orders) => {
                   OrderRequestHeader: {
                     '@agreementID': '',
                     '@type': 'new',
-                    '@orderID': 1234,
+                    '@orderID': order.AmazonOrderId,
                     Total: null,
                     ShipTo: {
                       Address: {
@@ -121,18 +126,18 @@ const buildXMLFiles = (orders) => {
                         '@isoCountryCode': 'US',
                         Name: {
                           '@xmllang': 'en',
-                          '#text': 'var - Address line 1'
+                          '#text': order.ShippingAddress.AddressLine1 || ''
                         },
                         PostalAddress: {
                           '@name': 'default',
-                          DeliverTo: 'var - Address line 2',
-                          Street: 'var - Address line 3',
-                          Street: 'var - Address line 4',
-                          City: 'var - City',
-                          State: 'CA',
-                          PostalCode: 'Postal Code',
+                          DeliverTo: order.ShippingAddress.AddressLine2 || '',
+                          Street: order.ShippingAddress.AddressLine3 || '',
+                          Street: order.ShippingAddress.AddressLine4 || '',
+                          City: order.ShippingAddress.City || '',
+                          State: order.ShippingAddress.StateOrRegion || '',
+                          PostalCode: order.ShippingAddress.PostalCode || '',
                           Country: {
-                            '@isoCountryCode': 'US'
+                            '@isoCountryCode': order.ShippingAddress.CountryCode || ''
                           }
                         }
                       }
@@ -141,10 +146,10 @@ const buildXMLFiles = (orders) => {
                     Contact: {
                       Name: {
                         '@xmllang': 'en',
-                        '#text': 'Amazon Buyers Name'
+                        '#text': order.ShippingAddress.Name || ''
                       }
                     },
-                    Comments: 'Phone Number: phone number goes here',
+                    Comments: order.ShippingAddress.Phone || '',
                     Extrinsic: {
                       '@name': 'Issuing Office',
                       '#text': 'Amazon'
@@ -159,37 +164,45 @@ const buildXMLFiles = (orders) => {
                     Extrinsic: {
                       '@name': 'Note'
                     }
-                  },
-                  ItemOut: {
-                    '@lineNumber': 1,
-                    '@quantity': 1,
+                  }
+                },
+                ItemOut: order.OrderItems.map((item, index) => {
+                  return {
+                    '@lineNumber': `${index + 1}`,
+                    '@quantity': item.QuantityOrdered,
                     ItemID: {
-                      SupplierPartID: 'HEWCF340A'
+                      SupplierPartID: item.ASIN
                     },
                     ItemDetail: {
                       UnitPrice: {
                         Money: {
-                          '@currency': 'USD',
-                          '#text': 'line item sell price'
+                          '@currency': item.ItemPrice.CurrencyCode,
+                          '#text': item.ItemPrice.Amount
                         }
                       },
                       Description: {
-                        '@xmllang': 'en'
+                        '@xmllang': 'en',
+                        '#text': item.Title
                       },
                       UnitOfMeasure: null,
                       ManufacturerPartID: null,
                       ManufacturerName: null
                     }
                   }
-                }
+                })
               }
             }
           }
+
           const feed = builder.create(template, { encoding })
           const xmlContent = feed.end({ pretty: true })
 
-          fs.writeFile(archiveDirectoryPath, xmlContent, encoding, (err) => {
-              if (e) { throw(e) }
+          console.log('***************************************************************************')
+          console.log('XML FILE:', xmlContent)
+          console.log('***************************************************************************')
+
+          fs.writeFile(filePath, xmlContent, encoding, (error) => {
+              if (error) { console.log(error) }
               generatedFiles++
               // Should resolve with directory path
               if (orders.length === generatedFiles) { resolve(archiveDirectoryPath) }
@@ -203,17 +216,18 @@ const buildXMLFiles = (orders) => {
 const compressFiles = (directoryPath) => {
   const archiveName = directoryPath.split('/').slice(-1)
   const destinationPath = `${directoryPath}/${archiveName}.zip`
-  
+
   zipper.sync.zip(directoryPath).compress().save(destinationPath);
 }
 
 const init = () => {
-  const today     = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes')
-  const yesterday = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day')
-  
+  const today     = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day')
+  const yesterday = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(2, 'day')
+
   return fetchOrders(yesterday.format(), today.format())
     .then(fetchOrderItems)
     .then(buildXMLFiles)
+    .catch((e) => console.log(e))
     .then(compressFiles)
     // .then(emailToRecipient)
 }
