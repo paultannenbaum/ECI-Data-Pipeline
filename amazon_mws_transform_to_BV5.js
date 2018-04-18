@@ -16,6 +16,7 @@ const tz = require('moment-timezone')
 const builder = require('xmlbuilder')
 const mkdirp = require('mkdirp')
 const isEmpty = require('lodash.isempty');
+const zipper = require('zip-local');
 
 // Business Logic
 const fetchOrders = (createdAfter, createdBefore) => {
@@ -200,25 +201,25 @@ const buildXMLFiles = (orders) => {
 }
 
 const compressFiles = (directoryPath) => {
-  const files = fs.readdirSync(directoryPath)
-  console.log(files)
+  const archiveName = directoryPath.split('/').slice(-1)
+  const destinationPath = `${directoryPath}/${archiveName}.zip`
+  
+  zipper.sync.zip(directoryPath).compress().save(destinationPath);
 }
 
 const init = () => {
   const today     = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes')
-  const yesterday = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(20, 'day')
+  const yesterday = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day')
   
   return fetchOrders(yesterday.format(), today.format())
     .then(fetchOrderItems)
     .then(buildXMLFiles)
     .then(compressFiles)
-    // .then(saveToDirectory)
     // .then(emailToRecipient)
 }
 
 init()
 
 // TODO: Handle zero orders
-// TODO: Error handling
+// TODO: Error handling/Reporting
 // TODO: Throttling
-// TODO: Handle non arrays
