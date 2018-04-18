@@ -12,8 +12,10 @@ const fs = require('fs');
 const util = require('util')
 const amazonMws = require('amazon-mws')(MWS_ACCESS_KEY_ID, MWS_SECRET_KEY)
 const moment = require('moment')
+const tz = require('moment-timezone')
 const builder = require('xmlbuilder')
 const mkdirp = require('mkdirp')
+const isEmpty = require('lodash.isempty');
 
 // Business Logic
 const fetchOrders = (createdAfter, createdBefore) => {
@@ -32,12 +34,18 @@ const fetchOrders = (createdAfter, createdBefore) => {
         return reject(error)
       }
       
+      // TODO: Handle zero orders
+      if (isEmpty(response.Orders.Order)) {
+        console.log('no orders')
+      }
+      
       // Make sure orders is an array
       const orders = util.isArray(response.Orders.Order) 
         ? response.Orders.Order 
         : [response.Orders.Order]
+        
+      console.log('TOTAL ORDERS:', orders.length)  
       
-      // TODO: Handle zero orders
       return resolve(orders)
     })
   })
@@ -179,11 +187,11 @@ const buildXMLFiles = (orders) => {
           const feed = builder.create(template, { encoding })
           const xmlContent = feed.end({ pretty: true })
 
-          fs.writeFile(filePath, xmlContent, encoding, (err) => {
+          fs.writeFile(archiveDirectoryPath, xmlContent, encoding, (err) => {
               if (e) { throw(e) }
               generatedFiles++
               // Should resolve with directory path
-              if (orders.length === generatedFiles) { resolve() }
+              if (orders.length === generatedFiles) { resolve(archiveDirectoryPath) }
           });
         })
       });
@@ -191,14 +199,19 @@ const buildXMLFiles = (orders) => {
   })
 }
 
+const compressFiles = (directoryPath) => {
+  const files = fs.readdirSync(directoryPath)
+  console.log(files)
+}
+
 const init = () => {
-  const yesterday = moment().subtract(3, 'day').seconds(0).milliseconds(0).toISOString()
-  const today = moment().subtract(1, 'day').seconds(0).milliseconds(0).toISOString()
+  const today     = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes')
+  const yesterday = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(20, 'day')
   
-  return fetchOrders(yesterday, today)
+  return fetchOrders(yesterday.format(), today.format())
     .then(fetchOrderItems)
     .then(buildXMLFiles)
-    // .then(compressFiles)
+    .then(compressFiles)
     // .then(saveToDirectory)
     // .then(emailToRecipient)
 }
