@@ -17,6 +17,7 @@ const builder = require('xmlbuilder')
 const mkdirp = require('mkdirp')
 const isEmpty = require('lodash.isempty');
 const zipper = require('zip-local');
+const CronJob = require('cron').CronJob;
 
 // Business Logic
 const fetchOrders = (createdAfter, createdBefore) => {
@@ -233,10 +234,15 @@ const init = (start, end) => {
 }
 
 // init()
-const start   = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(43, 'day').format()
-const end = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day').format()
+const start = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(43, 'day').format()
+const end   = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day').format()
 
 init(start, end)
+
+new CronJob('* * * * * *', function() {
+  console.log('You will see this message every second')
+  console.log(tz(moment(), 'America/Los_Angeles').format())
+}, null, true, 'America/Los_Angeles')
 
 // Two line names,
 // TODO: Handle zero orders
