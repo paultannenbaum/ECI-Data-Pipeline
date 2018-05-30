@@ -1,4 +1,4 @@
-// Load Enviroment Variables
+// Load Environment Variables
 require('dotenv').config()
 
 // Env variables
@@ -95,12 +95,8 @@ const buildXMLFiles = (orders) => {
         if (e) { throw(e) }
 
         orders.forEach(order => {
-          console.log('***************************************************************************')
-          console.log('Order:', util.inspect(order, false, null))
-          console.log('***************************************************************************')
-
           const fileName = order.AmazonOrderId
-          const filePath = `${archiveDirectoryPath}/${order.AmazonOrderId}.xml`
+          const filePath = `${archiveDirectoryPath}/${fileName}.xml`
           const encoding = 'utf-8'
           const template = {
             cXML: {
@@ -122,17 +118,16 @@ const buildXMLFiles = (orders) => {
                     Total: null,
                     ShipTo: {
                       Address: {
-                        '@addressID': 01,
+                        '@addressID': '01',
                         '@isoCountryCode': 'US',
                         Name: {
                           '@xmllang': 'en',
-                          '#text': order.ShippingAddress.AddressLine1 || ''
+                          '#text': order.ShippingAddress.Name || ''
                         },
                         PostalAddress: {
                           '@name': 'default',
-                          DeliverTo: order.ShippingAddress.AddressLine2 || '',
-                          Street: order.ShippingAddress.AddressLine3 || '',
-                          Street: order.ShippingAddress.AddressLine4 || '',
+                          DeliverTo: order.ShippingAddress.AddressLine1 || '',
+                          Street: order.ShippingAddress.AddressLine2 || '', // TODO: Break up if char count is > 30
                           City: order.ShippingAddress.City || '',
                           State: order.ShippingAddress.StateOrRegion || '',
                           PostalCode: order.ShippingAddress.PostalCode || '',
@@ -142,64 +137,72 @@ const buildXMLFiles = (orders) => {
                         }
                       }
                     },
-                    Payment: null,
+                    Payment: {
+                      Extrinsic: {
+                        '@name': 'Card Type',
+                        '#text': 'X'
+                      },
+                      PCard: {
+                        '@name': 'X',
+                        '@expiration': 'XXXX-01-01',
+                        '@number': 'X'
+                      }
+                    },
                     Contact: {
                       Name: {
                         '@xmllang': 'en',
-                        '#text': order.ShippingAddress.Name || ''
+                        '#text': order.BuyerName || ''
                       }
                     },
                     Comments: order.ShippingAddress.Phone || '',
-                    Extrinsic: {
-                      '@name': 'Issuing Office',
-                      '#text': 'Amazon'
-                    },
-                    Extrinsic: {
-                      '@name': 'Requisition Office',
-                      '#text': 'Sales Order'
-                    },
-                    Extrinsic: {
-                      '@name': 'Accounting and Appropriation'
-                    },
-                    Extrinsic: {
-                      '@name': 'Note'
-                    }
-                  }
-                },
-                ItemOut: order.OrderItems.map((item, index) => {
-                  return {
-                    '@lineNumber': `${index + 1}`,
-                    '@quantity': item.QuantityOrdered,
-                    ItemID: {
-                      SupplierPartID: item.ASIN
-                    },
-                    ItemDetail: {
-                      UnitPrice: {
-                        Money: {
-                          '@currency': item.ItemPrice.CurrencyCode,
-                          '#text': item.ItemPrice.Amount
-                        }
+                    Extrinsic: [
+                      {
+                        '@name': 'Issuing Office',
+                        '#text': 'Amazon'
                       },
-                      Description: {
-                        '@xmllang': 'en',
-                        '#text': item.Title
+                      {
+                        '@name': 'Requisition Office',
+                        '#text': 'Sales Order'
                       },
-                      UnitOfMeasure: null,
-                      ManufacturerPartID: null,
-                      ManufacturerName: null
+                      {
+                        '@name': 'Accounting and Appropriation'
+                      },
+                      {
+                        '@name': 'Note'
+                      }
+                    ]
+                  },
+                  ItemOut: order.OrderItems.map((item, index) => {
+                    return {
+                      '@lineNumber': `${index + 1}`,
+                      '@quantity': item.QuantityOrdered,
+                      ItemID: {
+                        SupplierPartID: item.SellerSKU
+                      },
+                      ItemDetail: {
+                        UnitPrice: {
+                          Money: {
+                            '@currency': item.ItemPrice.CurrencyCode,
+                            '#text': item.ItemPrice.Amount
+                          }
+                        },
+                        Description: {
+                          '@xmllang': 'en',
+                          '#text': item.Title
+                        },
+                        UnitOfMeasure: 'EA',
+                        ManufacturerPartID: null,
+                        ManufacturerName: null
+                      }
                     }
-                  }
-                })
+                  })
+                }
               }
             }
           }
 
           const feed = builder.create(template, { encoding })
           const xmlContent = feed.end({ pretty: true })
-
-          console.log('***************************************************************************')
-          console.log('XML FILE:', xmlContent)
-          console.log('***************************************************************************')
 
           fs.writeFile(filePath, xmlContent, encoding, (error) => {
               if (error) { console.log(error) }
@@ -220,11 +223,8 @@ const compressFiles = (directoryPath) => {
   zipper.sync.zip(directoryPath).compress().save(destinationPath);
 }
 
-const init = () => {
-  const today     = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day')
-  const yesterday = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(2, 'day')
-
-  return fetchOrders(yesterday.format(), today.format())
+const init = (start, end) => {
+  return fetchOrders(start, end)
     .then(fetchOrderItems)
     .then(buildXMLFiles)
     .catch((e) => console.log(e))
@@ -232,8 +232,15 @@ const init = () => {
     // .then(emailToRecipient)
 }
 
-init()
+// init()
+const start   = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(43, 'day').format()
+const end = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day').format()
 
+init(start, end)
+
+// Two line names,
 // TODO: Handle zero orders
+// TODO: Do dupe checking
 // TODO: Error handling/Reporting
 // TODO: Throttling
+// Cron should run every four hours, go to louis email
