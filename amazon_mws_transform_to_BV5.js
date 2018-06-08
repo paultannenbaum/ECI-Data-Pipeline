@@ -6,6 +6,9 @@ const MWS_ACCESS_KEY_ID = process.env.MWS_ACCESS_KEY_ID
 const MWS_SECRET_KEY = process.env.MWS_SECRET_KEY
 const MWS_SELLER_ID = process.env.MWS_SELLER_ID
 const MWS_MARKETPLACE_ID = process.env.MWS_MARKETPLACE_ID
+const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY
+const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN
+const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL
 
 // Packages
 const fs = require('fs');
@@ -15,9 +18,10 @@ const moment = require('moment')
 const tz = require('moment-timezone')
 const builder = require('xmlbuilder')
 const mkdirp = require('mkdirp')
-const isEmpty = require('lodash.isempty');
-const zipper = require('zip-local');
-const CronJob = require('cron').CronJob;
+const isEmpty = require('lodash.isempty')
+const zipper = require('zip-local')
+const cronJob = require('cron').CronJob
+const mailgun = require('mailgun-js')({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN })
 
 // Business Logic
 const fetchOrders = (createdAfter, createdBefore) => {
@@ -224,6 +228,21 @@ const compressFiles = (directoryPath) => {
   zipper.sync.zip(directoryPath).compress().save(destinationPath);
 }
 
+const sendFileToRecipient = () => {
+  console.log('About to send email')
+  const data = {
+    "from": `Automated Report <noreply@${MAILGUN_DOMAIN}>`,
+    to: RECIPIENT_EMAIL,
+    subject: 'Sap Pawly',
+    text: 'Hi Paul!'
+  }
+  console.log(data)
+
+  return mailgun.messages().send(data, function (error, body) {
+    console.log(body)
+  })
+}
+
 const init = (start, end) => {
   return fetchOrders(start, end)
     .then(fetchOrderItems)
@@ -237,12 +256,14 @@ const init = (start, end) => {
 const start = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(43, 'day').format()
 const end   = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day').format()
 
-init(start, end)
+sendFileToRecipient()
 
-new CronJob('* * * * * *', function() {
-  console.log('You will see this message every second')
-  console.log(tz(moment(), 'America/Los_Angeles').format())
-}, null, true, 'America/Los_Angeles')
+// init(start, end)
+
+// new CronJob('* * * * * *', function() {
+//   console.log('You will see this message every second')
+//   console.log(tz(moment(), 'America/Los_Angeles').format())
+// }, null, true, 'America/Los_Angeles')
 
 // Two line names,
 // TODO: Handle zero orders

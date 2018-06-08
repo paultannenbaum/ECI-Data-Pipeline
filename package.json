@@ -5,6 +5,7 @@
     "dotenv": "^5.0.1",
     "fs": "^0.0.1-security",
     "lodash.isempty": "^4.4.0",
+    "mailgun-js": "^0.18.0",
     "mkdirp": "^0.5.1",
     "moment": "^2.22.0",
     "moment-timezone": "^0.5.15",
