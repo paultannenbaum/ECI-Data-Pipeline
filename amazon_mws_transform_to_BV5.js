@@ -8,10 +8,11 @@ const MWS_SELLER_ID = process.env.MWS_SELLER_ID
 const MWS_MARKETPLACE_ID = process.env.MWS_MARKETPLACE_ID
 const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY
 const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN
-const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL
+const NCI_RECIPIENT_EMAIL = process.env.NCI_RECIPIENT_EMAIL
+const APP_ADMIN_EMAIL = process.env.APP_ADMIN_EMAIL
 
 // Packages
-const fs = require('fs');
+const fs = require('fs')
 const util = require('util')
 const amazonMws = require('amazon-mws')(MWS_ACCESS_KEY_ID, MWS_SECRET_KEY)
 const moment = require('moment')
@@ -24,24 +25,72 @@ const cronJob = require('cron').CronJob
 const mailgun = require('mailgun-js')({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN })
 
 // Business Logic
-const fetchOrders = (createdAfter, createdBefore) => {
+const orderRangeStart      = tz(moment(), 'America/Los_Angeles').subtract(60, 'days')
+const orderRangeEnd        = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes')
+const orderRangeStartISO   = orderRangeStart.format()
+const orderRangeEndISO     = orderRangeEnd.format()
+const orderRangeStartHuman = orderRangeStart.format('MM_DD_YY_HH:mm')
+const orderRangeEndHuman   = orderRangeEnd.format('MM_DD_YY_HH:mm')
+
+
+const sendErrorReportToAppAdmin = (errorType, error) => {
+  const data = {
+    from: `Error Reporter <noreply@${MAILGUN_DOMAIN}>`,
+    to: APP_ADMIN_EMAIL,
+    subject: `NCI APP ERROR: ${errorType}`,
+    text: `
+      Orders created after: ${orderRangeStartHuman}
+      Orders created before: ${orderRangeEndHuman}
+      Error Details: ${util.inspect(error, false, null)}
+    `
+  }
+
+  return mailgun.messages().send(data)
+}
+
+const sendNoNewOrdersToRecipient = () => {
+  const data = {
+    from: `Automated Report <noreply@${MAILGUN_DOMAIN}>`,
+    to: NCI_RECIPIENT_EMAIL,
+    subject: `No orders: ${orderRangeStartHuman} - ${orderRangeEndHuman}`,
+    text: `There have been no newly created orders in Amazon from ${orderRangeStartHuman} to ${orderRangeEndHuman}.`
+  }
+
+  return mailgun.messages().send(data, function (error) {
+    if (error) {
+      sendErrorReportToAppAdmin('Failed email delivery', error)
+      return Promise.reject('RESOLVED ERROR')
+    }
+  })
+}
+
+const handleError = (error) => {
+  if (error !== 'RESOLVED ERROR') {
+    sendErrorReportToAppAdmin('Unhandled Error', error)
+  } else {
+    console.log('error handled')
+  }
+}
+
+const fetchOrders = () => {
   return new Promise((resolve, reject) => {
     amazonMws.orders.search({
         'Version': '2013-09-01',
         'Action': 'ListOrders',
         'SellerId': MWS_SELLER_ID,
         'MarketplaceId.Id.1': MWS_MARKETPLACE_ID,
-        'CreatedAfter': createdAfter,
-        'CreatedBefore': createdBefore
+        'CreatedAfter': orderRangeStartISO,
+        'CreatedBefore': orderRangeEndISO
     }, (error, response) => {
       if (error) {
-        console.log('error:', error)
-        return reject(error)
+        sendErrorReportToAppAdmin('Failed to MWS GET Orders request', error)
+        return reject('RESOLVED ERROR')
       }
 
-      // TODO: Handle zero orders
+      // No new orders received
       if (isEmpty(response.Orders.Order)) {
-        console.log('no orders')
+        sendNoNewOrdersToRecipient()
+        return reject('RESOLVED ERROR')
       }
 
       // Make sure orders is an array
@@ -55,6 +104,11 @@ const fetchOrders = (createdAfter, createdBefore) => {
 }
 
 const fetchOrderItems = (orders) => {
+  console.log('***************************************************************************')
+  console.log('Orders Created After:', orderRangeStartHuman)
+  console.log('Orders Created Before:', orderRangeEndHuman)
+  console.log('***************************************************************************')
+
   return new Promise((resolve, reject) => {
     const orderWithItems = []
 
@@ -67,8 +121,8 @@ const fetchOrderItems = (orders) => {
           'AmazonOrderId': order.AmazonOrderId
         }, (error, response) => {
           if (error) {
-            console.log('error:', error)
-            return reject(error)
+            sendErrorReportToAppAdmin('Failed to MWS GET OrderItems request', error)
+            return reject('RESOLVED ERROR')
           }
 
           // Make sure OrderItems is an array (Amazon capitalizes properties, stay consistent)
@@ -93,15 +147,19 @@ const buildXMLFiles = (orders) => {
   return new Promise((resolve, reject) => {
     try {
       const baseDirectoryPath = './files'
-      const archiveDirectoryPath = `${baseDirectoryPath}/${moment().format('MM_DD_YY')}`
+      const archiveDirName = `${orderRangeStartHuman}__${orderRangeEndHuman}`
+      const archiveDirPath = `${baseDirectoryPath}/${archiveDirName}`
       let generatedFiles = 0
 
-      mkdirp(archiveDirectoryPath, (e) => {
-        if (e) { throw(e) }
+      mkdirp(archiveDirPath, (error) => {
+        if (error) {
+          sendErrorReportToAppAdmin('Failed to make archive directory', error)
+          return reject('RESOLVED ERROR')
+        }
 
         orders.forEach(order => {
           const fileName = order.AmazonOrderId
-          const filePath = `${archiveDirectoryPath}/${fileName}.xml`
+          const filePath = `${archiveDirPath}/${fileName}.xml`
           const encoding = 'utf-8'
           const template = {
             cXML: {
@@ -210,64 +268,78 @@ const buildXMLFiles = (orders) => {
           const xmlContent = feed.end({ pretty: true })
 
           fs.writeFile(filePath, xmlContent, encoding, (error) => {
-              if (error) { console.log(error) }
+              if (error) {
+                sendErrorReportToAppAdmin('Failed to create xml file', error)
+                return reject('RESOLVED ERROR')
+              }
+
               generatedFiles++
               // Should resolve with directory path
-              if (orders.length === generatedFiles) { resolve(archiveDirectoryPath) }
-          });
+              if (orders.length === generatedFiles) { resolve({ archiveDirName, archiveDirPath }) }
+          })
         })
-      });
+      })
     } catch(e){reject(e)}
   })
 }
 
-const compressFiles = (directoryPath) => {
-  const archiveName = directoryPath.split('/').slice(-1)
-  const destinationPath = `${directoryPath}/${archiveName}.zip`
+const compressFiles = ({ archiveDirName, archiveDirPath }) => {
+  const zipFileName = `${archiveDirPath}/${archiveDirName}.zip`
 
-  zipper.sync.zip(directoryPath).compress().save(destinationPath);
+  zipper.sync.zip(archiveDirPath).compress().save(zipFileName, (error) => {
+    if (error) {
+      sendErrorReportToAppAdmin('Failed to zip order xml files', error)
+      return Promise.reject('RESOLVED ERROR')
+    }
+  })
+
+  // TODO: Remove xml files
+  return Promise.resolve(zipFileName)
 }
 
-const sendFileToRecipient = () => {
-  console.log('About to send email')
+const sendFileToRecipient = (zipFile) => {
   const data = {
-    "from": `Automated Report <noreply@${MAILGUN_DOMAIN}>`,
-    to: RECIPIENT_EMAIL,
-    subject: 'Sap Pawly',
-    text: 'Hi Paul!'
+    from: `Automated Report <noreply@${MAILGUN_DOMAIN}>`,
+    to: NCI_RECIPIENT_EMAIL,
+    subject: 'New Amazon XML file ready to upload',
+    text:
+      `
+      Attached is an zip file for all new orders for the time period:
+      
+      start: ${orderRangeStartHuman}
+      end: ${orderRangeEndHuman}
+      `,
+    attachment: zipFile
   }
-  console.log(data)
 
-  return mailgun.messages().send(data, function (error, body) {
-    console.log(body)
+  return mailgun.messages().send(data, function (error) {
+    if (error) {
+      sendErrorReportToAppAdmin('Failed email delivery', error)
+      return Promise.reject('RESOLVED ERROR')
+    }
+
+    console.log('***************************************************************************')
+    console.log('PROCESS COMPLETED: Zip file emailed to recipient')
+    console.log('***************************************************************************')
   })
 }
 
-const init = (start, end) => {
-  return fetchOrders(start, end)
+const init = () => {
+  return fetchOrders()
     .then(fetchOrderItems)
     .then(buildXMLFiles)
-    .catch((e) => console.log(e))
     .then(compressFiles)
-    // .then(emailToRecipient)
+    .then(sendFileToRecipient)
+    .catch(handleError)
 }
 
-// init()
-const start = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(43, 'day').format()
-const end   = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(1, 'day').format()
-
-sendFileToRecipient()
-
-// init(start, end)
+init()
 
 // new CronJob('* * * * * *', function() {
 //   console.log('You will see this message every second')
 //   console.log(tz(moment(), 'America/Los_Angeles').format())
 // }, null, true, 'America/Los_Angeles')
 
-// Two line names,
-// TODO: Handle zero orders
-// TODO: Do dupe checking
-// TODO: Error handling/Reporting
 // TODO: Throttling
-// Cron should run every four hours, go to louis email
+// TODO: Two line names
+// TODO: Cron should run every four hours, go to louis email
