@@ -1,3 +1,8 @@
+// TODO: Automate deploys
+// TODO: Handle name/addresses where character count > 30
+// TODO: Handle Throttling
+// TODO: Remove xml files after zip is created
+
 // Load Environment Variables
 require('dotenv').config()
 
@@ -25,13 +30,12 @@ const cronJob = require('cron').CronJob
 const mailgun = require('mailgun-js')({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN })
 
 // Business Logic
-const orderRangeStart      = tz(moment(), 'America/Los_Angeles').subtract(60, 'days')
+const orderRangeStart      = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(4, 'hours')
 const orderRangeEnd        = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes')
 const orderRangeStartISO   = orderRangeStart.format()
 const orderRangeEndISO     = orderRangeEnd.format()
 const orderRangeStartHuman = orderRangeStart.format('MM_DD_YY_HH:mm')
 const orderRangeEndHuman   = orderRangeEnd.format('MM_DD_YY_HH:mm')
-
 
 const sendErrorReportToAppAdmin = (errorType, error) => {
   const data = {
@@ -190,7 +194,7 @@ const buildXMLFiles = (orders) => {
                         PostalAddress: {
                           '@name': 'default',
                           DeliverTo: order.ShippingAddress.AddressLine1 || '',
-                          Street: order.ShippingAddress.AddressLine2 || '', // TODO: Break up if char count is > 30
+                          Street: order.ShippingAddress.AddressLine2 || '',
                           City: order.ShippingAddress.City || '',
                           State: order.ShippingAddress.StateOrRegion || '',
                           PostalCode: order.ShippingAddress.PostalCode || '',
@@ -293,7 +297,6 @@ const compressFiles = ({ archiveDirName, archiveDirPath }) => {
     }
   })
 
-  // TODO: Remove xml files
   return Promise.resolve(zipFileName)
 }
 
@@ -325,21 +328,16 @@ const sendFileToRecipient = (zipFile) => {
 }
 
 const init = () => {
-  return fetchOrders()
-    .then(fetchOrderItems)
-    .then(buildXMLFiles)
-    .then(compressFiles)
-    .then(sendFileToRecipient)
-    .catch(handleError)
+  const fiveMinutesPastTheHourEveryFourHours = '5 */4 * * *'
+
+  new cronJob(fiveMinutesPastTheHourEveryFourHours, () => {
+    return fetchOrders()
+      .then(fetchOrderItems)
+      .then(buildXMLFiles)
+      .then(compressFiles)
+      .then(sendFileToRecipient)
+      .catch(handleError)
+  }, null, true, 'America/Los_Angeles')
 }
 
 init()
-
-// new CronJob('* * * * * *', function() {
-//   console.log('You will see this message every second')
-//   console.log(tz(moment(), 'America/Los_Angeles').format())
-// }, null, true, 'America/Los_Angeles')
-
-// TODO: Throttling
-// TODO: Two line names
-// TODO: Cron should run every four hours, go to louis email
