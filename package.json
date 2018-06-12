@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "start": "node app.js"
+  },
   "dependencies": {
     "amazon-mws": "^0.0.15",
     "cron": "^1.3.0",
