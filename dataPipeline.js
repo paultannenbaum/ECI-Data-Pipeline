@@ -26,6 +26,7 @@ const mkdirp = require('mkdirp')
 const isEmpty = require('lodash.isempty')
 const zipper = require('zip-local')
 const mailgun = require('mailgun-js')({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN })
+const chunk = require('chunk-text')
 
 // Business Logic
 let pipeline = {}
@@ -168,9 +169,22 @@ const buildXMLFiles = (orders) => {
         }
 
         orders.forEach(order => {
+          console.log(util.inspect(order.ShippingAddress))
+
           const fileName = order.AmazonOrderId
           const filePath = `${archiveDirPath}/${fileName}.xml`
           const encoding = 'utf-8'
+          const chunkedAddress = () => {
+            let chunked = []
+            const addressLinesToChunk = [2, 3, 4, 5]
+
+            addressLinesToChunk.forEach((lineNumber) => {
+              const addressKey = `AddressLine${lineNumber}`
+              if (order.ShippingAddress[addressKey]) { chunked = [...chunked, chunk(order.ShippingAddress[addressKey], 30)] }
+            })
+
+            return chunked
+          }
           const template = {
             cXML: {
               '@xmllang': 'en_US',
@@ -200,7 +214,7 @@ const buildXMLFiles = (orders) => {
                         PostalAddress: {
                           '@name': 'default',
                           DeliverTo: order.ShippingAddress.AddressLine1 || '',
-                          Street: order.ShippingAddress.AddressLine2 || '',
+                          Street: chunkedAddress(),
                           City: order.ShippingAddress.City || '',
                           State: order.ShippingAddress.StateOrRegion || '',
                           PostalCode: order.ShippingAddress.PostalCode || '',
