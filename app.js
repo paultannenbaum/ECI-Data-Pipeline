@@ -1,4 +1,4 @@
-// TODO: Automate deploys
+// TODO: Setup a way to run without the cron
 // TODO: Handle name/addresses where character count > 30
 // TODO: Handle Throttling
 // TODO: Remove xml files after zip is created
@@ -30,12 +30,18 @@ const cronJob = require('cron').CronJob
 const mailgun = require('mailgun-js')({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN })
 
 // Business Logic
-const orderRangeStart      = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(4, 'hours')
-const orderRangeEnd        = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes')
-const orderRangeStartISO   = orderRangeStart.format()
-const orderRangeEndISO     = orderRangeEnd.format()
-const orderRangeStartHuman = orderRangeStart.format('MM_DD_YY_HH:mm')
-const orderRangeEndHuman   = orderRangeEnd.format('MM_DD_YY_HH:mm')
+let orderRange = {}
+
+const setOrderRange = () => {
+  orderRange.start      = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes').subtract(4, 'hours')
+  orderRange.end        = tz(moment(), 'America/Los_Angeles').subtract(5, 'minutes')
+  orderRange.startISO   = orderRange.start.format()
+  orderRange.endISO     = orderRange.end.format()
+  orderRange.startHuman = orderRange.start.format('MM_DD_YY_HH:mm')
+  orderRange.endHuman   = orderRange.end.format('MM_DD_YY_HH:mm')
+
+  return Promise.resolve()
+}
 
 const sendErrorReportToAppAdmin = (errorType, error) => {
   const data = {
@@ -43,8 +49,8 @@ const sendErrorReportToAppAdmin = (errorType, error) => {
     to: APP_ADMIN_EMAIL,
     subject: `NCI APP ERROR: ${errorType}`,
     text: `
-      Orders created after: ${orderRangeStartHuman}
-      Orders created before: ${orderRangeEndHuman}
+      Orders created after: ${orderRange.startHuman}
+      Orders created before: ${orderRange.endHuman}
       Error Details: ${util.inspect(error, false, null)}
     `
   }
@@ -56,8 +62,8 @@ const sendNoNewOrdersToRecipient = () => {
   const data = {
     from: `Automated Report <noreply@${MAILGUN_DOMAIN}>`,
     to: NCI_RECIPIENT_EMAIL,
-    subject: `No orders: ${orderRangeStartHuman} - ${orderRangeEndHuman}`,
-    text: `There have been no newly created orders in Amazon from ${orderRangeStartHuman} to ${orderRangeEndHuman}.`
+    subject: `No orders: ${orderRange.startHuman} - ${orderRange.endHuman}`,
+    text: `There have been no newly created orders in Amazon from ${orderRange.startHuman} to ${orderRange.endHuman}.`
   }
 
   return mailgun.messages().send(data, function (error) {
@@ -83,8 +89,8 @@ const fetchOrders = () => {
         'Action': 'ListOrders',
         'SellerId': MWS_SELLER_ID,
         'MarketplaceId.Id.1': MWS_MARKETPLACE_ID,
-        'CreatedAfter': orderRangeStartISO,
-        'CreatedBefore': orderRangeEndISO
+        'CreatedAfter': orderRange.startISO,
+        'CreatedBefore': orderRange.endISO
     }, (error, response) => {
       if (error) {
         sendErrorReportToAppAdmin('Failed to MWS GET Orders request', error)
@@ -109,8 +115,8 @@ const fetchOrders = () => {
 
 const fetchOrderItems = (orders) => {
   console.log('***************************************************************************')
-  console.log('Orders Created After:', orderRangeStartHuman)
-  console.log('Orders Created Before:', orderRangeEndHuman)
+  console.log('Orders Created After:', orderRange.startHuman)
+  console.log('Orders Created Before:', orderRange.endHuman)
   console.log('***************************************************************************')
 
   return new Promise((resolve, reject) => {
@@ -151,7 +157,7 @@ const buildXMLFiles = (orders) => {
   return new Promise((resolve, reject) => {
     try {
       const baseDirectoryPath = './files'
-      const archiveDirName = `${orderRangeStartHuman}__${orderRangeEndHuman}`
+      const archiveDirName = `${orderRange.startHuman}__${orderRange.endHuman}`
       const archiveDirPath = `${baseDirectoryPath}/${archiveDirName}`
       let generatedFiles = 0
 
@@ -309,8 +315,8 @@ const sendFileToRecipient = (zipFile) => {
       `
       Attached is an zip file for all new orders for the time period:
       
-      start: ${orderRangeStartHuman}
-      end: ${orderRangeEndHuman}
+      start: ${orderRange.startHuman}
+      end: ${orderRange.endHuman}
       `,
     attachment: zipFile
   }
@@ -331,7 +337,8 @@ const init = () => {
   const fiveMinutesPastTheHourEveryFourHours = '5 */4 * * *'
 
   new cronJob(fiveMinutesPastTheHourEveryFourHours, () => {
-    return fetchOrders()
+    return setOrderRange()
+      .then(fetchOrders)
       .then(fetchOrderItems)
       .then(buildXMLFiles)
       .then(compressFiles)
