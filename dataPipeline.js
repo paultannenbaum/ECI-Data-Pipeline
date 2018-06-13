@@ -60,9 +60,14 @@ const sendErrorReportToAppAdmin = (errorType, error) => {
 }
 
 const sendNoNewOrdersToRecipient = () => {
+  console.log('***************************************************************************')
+  console.log('No orders placed during this time period')
+  console.log('***************************************************************************')
+
   const data = {
     from: `Automated Report <noreply@${MAILGUN_DOMAIN}>`,
     to: NCI_RECIPIENT_EMAIL,
+    cc: APP_ADMIN_EMAIL,
     subject: `No orders: ${pipeline.orderRange.startHuman} - ${pipeline.orderRange.endHuman}`,
     text: `There have been no newly created orders in Amazon from ${pipeline.orderRange.startHuman} to ${pipeline.orderRange.endHuman}.`
   }
@@ -324,6 +329,7 @@ const sendFileToRecipient = (zipFile) => {
   const data = {
     from: `Automated Report <noreply@${MAILGUN_DOMAIN}>`,
     to: NCI_RECIPIENT_EMAIL,
+    cc: APP_ADMIN_EMAIL,
     subject: 'New Amazon XML file ready to upload',
     text:
       `
